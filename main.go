@@ -1,15 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	//"io"
+	"io"
 	"io/ioutil"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
-	"strings"
 )
 
 //var PATHDIR string = "/home/diego/Downloads"
@@ -17,12 +19,27 @@ import (
 //1234
 
 type login struct {
-	statusLogin string `json:"status"`
-	msg         string `json:"msg"`
-	token       string `json:"token"`
+	Status  string `json:"status"`
+	Msg     string `json:"msg"`
+	Token   string `json:"token"`
+	Expires string `json:"expires"`
+}
+
+type userLogin struct {
+	User     string `json:"user"`
+	Password string `json:"password"`
 }
 
 func main() {
+
+	if len(os.Args) != 4 {
+
+		fmt.Println("Entre com os parametros")
+		fmt.Println(" -path <diretorio onde estara os arquivos>")
+		fmt.Println(" -user <jeff.otoni@gmail.com>")
+		fmt.Println(" -senha <1234>")
+		os.Exit(0)
+	}
 
 	pathdir := os.Args[1] //Receive path of the files.
 	user := os.Args[2]    //Receive user for login.
@@ -30,44 +47,54 @@ func main() {
 
 	apiUrl := "https://fileserver.s3apis.com/"
 	resource := "/v1/user/login"
-	data := url.Values{}
-	data.Add("password", pass)
-	data.Add("user", user)
 
 	u, _ := url.ParseRequestURI(apiUrl)
 	u.Path = resource
 	urlStr := u.String()
 
 	client := &http.Client{}
-	r, _ := http.NewRequest("POST", urlStr, strings.NewReader(data.Encode())) // URL-encoded payload
+	userjson := &userLogin{User: user, Password: pass}
+
+	bjson, err := json.Marshal(userjson)
+	if err != nil {
+		log.Fatal("Erro ao fazer Marshal!")
+		return
+	}
+	r, _ := http.NewRequest("POST", urlStr, bytes.NewBuffer(bjson)) // URL-encoded payload
+
 	r.Header.Add("X-Key", "ZmlsZXNlcnZlcjIwMThnb2xhbmdiaA==")
-	r.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	r.Header.Add("Content-Length", strconv.Itoa(len(data.Encode())))
+	r.Header.Add("Content-Type", "application/json")
 
 	resp, _ := client.Do(r)
-
-	//defer resp.Body.Close()
+	defer resp.Body.Close()
 
 	if resp.StatusCode == 200 {
-
 		body, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
 			log.Fatal("Erro na leitura")
 			return
 		}
+
 		ret := login{}
 		err = json.Unmarshal(body, &ret)
+
 		if err != nil {
 			log.Println("Erro ao ler json")
 		}
 
-		fmt.Println(string(ret.msg))
-		if ret.statusLogin == "" {
+		// pegando o retorno
+		fmt.Println(string(ret.Msg))
+		fmt.Println(string(ret.Status))
+		fmt.Println(string(ret.Expires))
+		fmt.Println(string(ret.Token))
 
+		// pode fazer..
+		if ret.Status == "ok" && ret.Token != "" {
 			if !verifyIsDir(pathdir) {
-				log.Fatal("Doe's not an directoris valid or not exists.")
+				log.Println("Doe's not an directoris valid or not exists.")
 				return
 			}
+
 			/**
 			read of the dir
 			*/
@@ -79,22 +106,15 @@ func main() {
 			execute loop in files of the dir's
 			*/
 			resource = "/v1/file/upload"
-			data := url.Values{}
+			u2, _ := url.ParseRequestURI(apiUrl)
+			u2.Path = resource
+			urlStr := u2.String()
 
 			for _, file := range files {
 				if !file.IsDir() {
-					data.Add("file[]", file.Name())
+					pathdirNowFile := pathdir + "/" + file.Name()
+					postFile(ret.Token, pathdirNowFile, urlStr)
 				}
-			}
-			client = &http.Client{}
-			r, _ := http.NewRequest("POST", urlStr, strings.NewReader(data.Encode())) // URL-encoded payload
-			r.Header.Add("Authorization", "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiamVmZi5vdG9uaUBnbWFpbC5jb20iLCJ1aWQiOiI0ZjQ0NzgxMTAzODkwNjA5ZmY1MDdmNjIzMTdlOGExMGFiMDc4ZjFmIiwidWlkd2tzIjoiMDE2NTcxNmNiNzBmMWM1N2ZhMzhhZGY5MGI1Y2QyMTdmNDE1NTJhNyIsImV4cCI6MTUzNzkwMzczMywiaXNzIjoiand0IEZpbGVTZXJ2ZXIifQ.Sse1XOfFOr1rxjhJIugF2CEQfB6e1PX4XizBlhL_eRhgTq8WJ5gbHSY0ab22gyHBBpGyB9Pwb0mmpcbHgvfGcW4Xvt0RsGatXBEgkV8uKsVP1zTwQxH_zyAuLOMIicFPvw42lYiOEjNwsGP5ujjcaaNzVUCYkHnezPuDQVq1LNQ")
-			r.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-			r.Header.Add("Content-Length", strconv.Itoa(len(data.Encode())))
-
-			resp, _ := client.Do(r)
-			if resp.StatusCode == 200 {
-				fmt.Printf("Post é: %+v\r\n", ret)
 			}
 		}
 
@@ -102,7 +122,6 @@ func main() {
 
 	}
 	/**
-
 	curl -X POST https://fileserver.s3apis.com/v1/file/upload --form "file=@seuarquivo" -H "Authorization: Bearer <token>"
 	verifica if is dir valid
 	*/
@@ -110,14 +129,100 @@ func main() {
 }
 
 func verifyIsDir(pathDir string) bool {
+
 	if stat, err := os.Stat(pathDir); err == nil && stat.IsDir() {
 		return true
 	}
 	return false
 }
 
-/*
-func checkIsFile(pathFile string) bool {
-	isFile, _ :=
-	return true
-}*/
+func postFile(Token, filename string, targetUrl string) error {
+
+	bodyBuf := &bytes.Buffer{}
+	bodyWriter := multipart.NewWriter(bodyBuf)
+
+	// this step is very important
+	fileWriter, err := bodyWriter.CreateFormFile("file", filename)
+	if err != nil {
+		fmt.Println("error writing to buffer")
+		return err
+	}
+
+	// open file handle
+	fh, err := os.Open(filename)
+	if err != nil {
+		fmt.Println("error opening file")
+		return err
+	}
+	defer fh.Close()
+
+	//iocopy
+	_, err = io.Copy(fileWriter, fh)
+	if err != nil {
+		return err
+	}
+
+	contentType := bodyWriter.FormDataContentType()
+	bodyWriter.Close()
+
+	client := &http.Client{}
+	//postData := make([]byte, 100)
+	resp, err := http.NewRequest("POST", targetUrl, bodyBuf)
+	if err != nil {
+		return err
+	}
+	resp.Header.Add("Content-Type", contentType)
+	resp.Header.Add("Authorization", "Bearer "+Token)
+	resp2, err := client.Do(resp)
+
+	defer resp2.Body.Close()
+
+	fmt.Println(resp2)
+
+	return nil
+}
+
+// Creates a new file upload http request with optional extra params
+func newfileUploadRequest(uri string, params map[string]string, paramName, path string) (*http.Request, error) {
+
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	fileContents, err := ioutil.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+
+	fi, err := file.Stat()
+
+	if err != nil {
+
+		return nil, err
+	}
+
+	file.Close()
+
+	body := new(bytes.Buffer)
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile(paramName, fi.Name())
+	if err != nil {
+		return nil, err
+	}
+
+	// copy...
+	//io.Copy(part, file)
+
+	part.Write(fileContents)
+	for key, val := range params {
+		_ = writer.WriteField(key, val)
+	}
+
+	err = writer.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	return http.NewRequest("POST", uri, body)
+}
