@@ -8,8 +8,9 @@ Para criar a api pode clonar o projeto: flieserver e usa-lo como referência ou 
 
 Para realizar as conexões deve alterar as seguintes informações:
 
--URL exemplo: http://api.domain.com/v1/user/create 
--TOKEN retornado pela api esse é o token gerado no momento em que foi criado o usuário
+1 URL exemplo: http://api.domain.com/v1/user/create 
+
+1 TOKEN retornado pela api esse é o token gerado no momento em que foi criado o usuário
 
 > O cliente usa esse token para realizar as conexões posteriores.
 
